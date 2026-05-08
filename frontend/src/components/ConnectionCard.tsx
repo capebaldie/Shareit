@@ -31,8 +31,9 @@ export default function ConnectionCard({ localInfo }: ConnectionCardProps) {
     let mounted = true;
     QRCode.toDataURL(preferredFrontendUrl, {
       errorCorrectionLevel: "M",
-      width: 220,
-      margin: 1,
+      width: 320,
+      margin: 0,
+      color: { dark: "#0c0c0a", light: "#00000000" },
     })
       .then((url) => {
         if (mounted) setQrCodeDataUrl(url);
@@ -45,20 +46,59 @@ export default function ConnectionCard({ localInfo }: ConnectionCardProps) {
     };
   }, [preferredFrontendUrl]);
 
+  const apiUrls = localInfo?.urls ?? [];
+
   return (
-    <section className="card connection">
-      <div>
+    <section className="box bracketed shadow manifest" aria-label="Connection manifest">
+      <div className="manifest-rows">
         <h2>Connect From Phone</h2>
-        <p className="muted">Open this URL on mobile (same Wi-Fi/hotspot):</p>
-        <p className="url-line">{preferredFrontendUrl}</p>
-        <p className="muted">Backend API:</p>
-        {(localInfo?.urls ?? []).map((url) => (
-          <p key={url} className="url-line small">
-            {url}
-          </p>
-        ))}
+
+        <div className="field">
+          <span className="field-key">Frontend URL</span>
+          <span className="field-val primary">
+            <span className="arrow">▸</span>
+            {preferredFrontendUrl}
+          </span>
+        </div>
+
+        <div className="field">
+          <span className="field-key">Backend API</span>
+          <span className="field-val">
+            {apiUrls.length === 0 ? (
+              <span style={{ color: "var(--mute)" }}>// probing routes…</span>
+            ) : (
+              <div className="url-list">
+                {apiUrls.map((url, i) => (
+                  <div key={url} className="url-row">
+                    <span className="idx">{(i + 1).toString().padStart(2, "0")}</span>
+                    <span>{url}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </span>
+        </div>
+
+        <div className="field">
+          <span className="field-key">Pairing</span>
+          <span className="field-val" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+            Same Wi-Fi or hotspot. Scan the code, or punch in the URL.
+          </span>
+        </div>
       </div>
-      {qrCodeDataUrl && <img className="qr-code" src={qrCodeDataUrl} alt="QR code for app URL" />}
+
+      <div className="qr-frame">
+        <div className="qr-wrap">
+          {qrCodeDataUrl ? (
+            <img className="qr-code" src={qrCodeDataUrl} alt="QR code for app URL" />
+          ) : (
+            <div className="qr-code" style={{ display: "grid", placeItems: "center" }}>
+              <span style={{ fontSize: 10, color: "var(--mute)" }}>GENERATING…</span>
+            </div>
+          )}
+        </div>
+        <span className="qr-cap">POINT · DEVICE · CAMERA</span>
+      </div>
     </section>
   );
 }

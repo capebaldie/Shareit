@@ -56,8 +56,8 @@ function getChunkByteSize(file: File, chunkIndex: number): number {
   return Math.max(0, chunkEnd - chunkStart);
 }
 
-async function requestUploadStatus(fileId: string): Promise<UploadStatusResponse> {
-  const response = await apiFetch(`/upload-status?file_id=${encodeURIComponent(fileId)}`);
+async function requestUploadStatus(fileId: string, signal?: AbortSignal): Promise<UploadStatusResponse> {
+  const response = await apiFetch(`/upload-status?file_id=${encodeURIComponent(fileId)}`, { signal });
   if (!response.ok) {
     return { merged: false, received_chunks: [] };
   }
@@ -118,7 +118,7 @@ export async function uploadFileInChunks({
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
   const startedAt = performance.now();
 
-  const status = await requestUploadStatus(fileId);
+  const status = await requestUploadStatus(fileId, signal);
   if (status.merged) {
     onProgress?.({
       fileId,
@@ -177,7 +177,7 @@ export async function uploadFileInChunks({
 
       uploadedBytes += getChunkByteSize(file, chunkIndex);
       const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);
-      const speedMbps = (uploadedBytes * 8) / (elapsedSeconds * 1024 * 1024);
+      const speedMbps = (uploadedBytes * 8) / (elapsedSeconds * 1_000_000);
       onProgress?.({
         fileId,
         uploadedBytes,

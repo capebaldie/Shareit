@@ -1,5 +1,5 @@
 import { formatBytes } from "../utils/chunkUpload";
-import type { SharedFileType, UploadItem } from "../types";
+import type { SharedFileType, UploadItem, UploadStatus } from "../types";
 
 interface UploadQueueProps {
   items: UploadItem[];
@@ -11,10 +11,34 @@ interface UploadQueueProps {
 }
 
 function typeLabel(type: SharedFileType): string {
-  if (type === "image") return "Image";
+  if (type === "image") return "IMG";
   if (type === "pdf") return "PDF";
-  if (type === "video") return "Video";
-  return "File";
+  if (type === "video") return "VID";
+  return "FILE";
+}
+
+function statusLabel(s: UploadStatus): string {
+  if (s === "pending") return "QUEUED";
+  if (s === "uploading") return "TX ▶";
+  if (s === "done") return "OK";
+  if (s === "failed") return "ERR";
+  return s;
+}
+
+const BAR_WIDTH = 28;
+
+function AsciiBar({ progress }: { progress: number }) {
+  const pct = Math.max(0, Math.min(100, progress));
+  const filled = Math.round((pct / 100) * BAR_WIDTH);
+  const empty = BAR_WIDTH - filled;
+  return (
+    <div className="ascii-bar" aria-hidden>
+      <span>[</span>
+      <span className="filled">{"█".repeat(filled)}</span>
+      <span className="empty">{"░".repeat(empty)}</span>
+      <span>]</span>
+    </div>
+  );
 }
 
 export default function UploadQueue({
@@ -26,70 +50,90 @@ export default function UploadQueue({
   onClearFinished,
 }: UploadQueueProps) {
   return (
-    <section className="card">
-      <div className="card-header">
+    <section className="box no-pad shadow" aria-label="Upload queue">
+      <div className="queue-head">
         <h2>Upload Queue</h2>
-        <div className="actions-row">
+        <div className="actions">
           <button
             type="button"
-            className="primary"
+            className="btn primary"
             onClick={onStart}
             disabled={!items.length || active}
           >
-            {active ? "Uploading..." : "Start Transfer"}
+            {active ? "Transmitting…" : "Start Transfer"}
           </button>
-          <button type="button" onClick={onClearFinished}>
-            Clear Completed
+          <button type="button" className="btn ghost" onClick={onClearFinished}>
+            Clear Done
           </button>
         </div>
       </div>
-      <div className="overall-progress">
-        <div className="progress-meta">
-          <span>Overall</span>
-          <span>{overallProgress}%</span>
-        </div>
-        <div className="progress-bar">
-          <span style={{ width: `${overallProgress}%` }} />
+
+      <div className="queue-overall">
+        <div className="meta">
+          <span className="num">{overallProgress.toString().padStart(3, "0")}%</span>
+          <AsciiBar progress={overallProgress} />
+          <span className="label">
+            {items.length === 0
+              ? "no payload"
+              : `${items.filter((i) => i.status === "done").length} of ${items.length} delivered`}
+          </span>
         </div>
       </div>
-      {!items.length && <p className="muted">No files selected yet.</p>}
-      <div className="upload-list">
-        {items.map((item) => (
-          <article key={item.id} className="upload-item">
-            <div className="upload-preview">
+
+      {!items.length && (
+        <p className="queue-empty">No payload selected. Drop or pick files above.</p>
+      )}
+
+      <div className="queue-list">
+        {items.map((item, idx) => (
+          <article key={item.id} className="queue-row">
+            <span className="idx">{(idx + 1).toString().padStart(2, "0")}</span>
+
+            <div className="preview" aria-hidden>
               {item.preview ? (
-                <img src={item.preview} alt={item.file.name} />
+                <img src={item.preview} alt="" />
               ) : (
                 <span className="type-pill">{typeLabel(item.type)}</span>
               )}
             </div>
-            <div className="upload-main">
-              <p className="file-name" title={item.file.name}>
+
+            <div className="body">
+              <p className="name" title={item.file.name}>
                 {item.file.name}
               </p>
-              <p className="file-meta">
-                {formatBytes(item.file.size)} • {typeLabel(item.type)}
-              </p>
-              <div className="progress-meta">
-                <span className={`status ${item.status}`}>{item.status}</span>
-                <span>{item.progress}%</span>
+              <div className="meta">
+                <span>{formatBytes(item.file.size)}</span>
+                <span className="sep">·</span>
+                <span>{typeLabel(item.type)}</span>
+                {item.speedMbps > 0 && (
+                  <>
+                    <span className="sep">·</span>
+                    <span>{item.speedMbps.toFixed(2)} Mbps</span>
+                  </>
+                )}
               </div>
-              <div className="progress-bar">
-                <span style={{ width: `${item.progress}%` }} />
+              <div className="row-progress">
+                <AsciiBar progress={item.progress} />
+                <span className={`pct ${item.status}`}>
+                  {item.progress.toString().padStart(3, "0")}%
+                </span>
               </div>
-              {item.speedMbps > 0 && (
-                <p className="file-meta">Speed: {item.speedMbps.toFixed(2)} Mbps</p>
-              )}
-              {item.error && <p className="error">{item.error}</p>}
+              {item.error && <p className="err">ERR · {item.error}</p>}
             </div>
-            <button
-              type="button"
-              className="danger-text"
-              onClick={() => onRemove(item.id)}
-              disabled={item.status === "uploading"}
-            >
-              Remove
-            </button>
+
+            <div className="right">
+              <span className={`status-tag ${item.status}`}>
+                {statusLabel(item.status)}
+              </span>
+              <button
+                type="button"
+                className="icon-x"
+                onClick={() => onRemove(item.id)}
+                aria-label={item.status === "uploading" ? "Cancel" : "Remove"}
+              >
+                {item.status === "uploading" ? "× cancel" : "× remove"}
+              </button>
+            </div>
           </article>
         ))}
       </div>

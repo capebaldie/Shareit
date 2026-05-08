@@ -3,6 +3,7 @@ import ipaddress
 import mimetypes
 import socket
 import shutil
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -12,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from utils.chunk_handler import (
-    all_chunks_received,
     classify_file,
     cleanup_chunks,
     ensure_directories,
@@ -26,14 +26,24 @@ from utils.chunk_handler import (
 BASE_DIR = Path(__file__).resolve().parent
 UPLOAD_DIR = BASE_DIR / "uploads"
 CHUNKS_ROOT = ensure_directories(UPLOAD_DIR)
-MAX_CHUNK_BYTES = 1024 * 1024 + 16 * 1024
+CHUNK_SIZE = 1024 * 1024
+MAX_CHUNK_BYTES = CHUNK_SIZE + 16 * 1024
+MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024
+MAX_TOTAL_CHUNKS = (MAX_FILE_BYTES + CHUNK_SIZE - 1) // CHUNK_SIZE
 STREAM_BUFFER_SIZE = 1024 * 1024
 
-app = FastAPI(title="ShareIt Local Transfer API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    await run_in_threadpool(reset_session_storage)
+    yield
+
+
+app = FastAPI(title="ShareIt Local Transfer API", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -50,6 +60,14 @@ def get_lock(file_id: str) -> asyncio.Lock:
     if file_id not in upload_locks:
         upload_locks[file_id] = asyncio.Lock()
     return upload_locks[file_id]
+
+
+def forget_file(filename: str) -> None:
+    file_owners.pop(filename, None)
+    for fid, name in list(merged_uploads.items()):
+        if name == filename:
+            merged_uploads.pop(fid, None)
+            upload_locks.pop(fid, None)
 
 
 def reset_session_storage() -> None:
@@ -75,17 +93,23 @@ def reset_session_storage() -> None:
     file_owners.clear()
 
 
-def file_iterator(path: Path, start: int, end: int):
-    with path.open("rb") as file_obj:
-        file_obj.seek(start)
-        remaining = end - start + 1
-        while remaining > 0:
-            read_size = min(STREAM_BUFFER_SIZE, remaining)
-            chunk = file_obj.read(read_size)
-            if not chunk:
-                break
-            remaining -= len(chunk)
-            yield chunk
+def file_iterator(path: Path, start: int, end: int, on_complete=None):
+    completed = False
+    try:
+        with path.open("rb") as file_obj:
+            file_obj.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                read_size = min(STREAM_BUFFER_SIZE, remaining)
+                chunk = file_obj.read(read_size)
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+        completed = remaining == 0
+    finally:
+        if completed and on_complete is not None:
+            on_complete()
 
 
 def parse_range_header(range_header: str | None, file_size: int) -> tuple[int, int, int]:
@@ -117,7 +141,12 @@ def parse_range_header(range_header: str | None, file_size: int) -> tuple[int, i
         raise HTTPException(status_code=416, detail="Invalid range request") from exc
 
 
-def build_streaming_response(path: Path, request: Request, inline: bool) -> StreamingResponse:
+def build_streaming_response(
+    path: Path,
+    request: Request,
+    inline: bool,
+    delete_on_complete: bool = False,
+) -> StreamingResponse:
     file_size = path.stat().st_size
     range_header = request.headers.get("range")
     start, end, status_code = parse_range_header(range_header, file_size)
@@ -134,8 +163,17 @@ def build_streaming_response(path: Path, request: Request, inline: bool) -> Stre
     if status_code == 206:
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
+    on_complete = None
+    if delete_on_complete and status_code == 200:
+        def on_complete() -> None:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            forget_file(path.name)
+
     return StreamingResponse(
-        file_iterator(path, start, end),
+        file_iterator(path, start, end, on_complete=on_complete),
         status_code=status_code,
         media_type=media_type,
         headers=headers,
@@ -204,11 +242,6 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.on_event("startup")
-async def startup_event() -> None:
-    await run_in_threadpool(reset_session_storage)
-
-
 @app.get("/local-info")
 async def local_info() -> dict[str, object]:
     local_ips = get_local_ips()
@@ -233,6 +266,8 @@ async def upload_chunk(
 ):
     if total_chunks <= 0:
         raise HTTPException(status_code=400, detail="total_chunks must be positive")
+    if total_chunks > MAX_TOTAL_CHUNKS:
+        raise HTTPException(status_code=413, detail="File exceeds maximum allowed size")
     if chunk_index < 0 or chunk_index >= total_chunks:
         raise HTTPException(status_code=400, detail="chunk_index out of range")
 
@@ -256,8 +291,8 @@ async def upload_chunk(
         if file_id in merged_uploads:
             return {"merged": True, "filename": merged_uploads[file_id]}
 
-        complete = await run_in_threadpool(all_chunks_received, CHUNKS_ROOT, file_id, total_chunks)
-        if complete:
+        received = await run_in_threadpool(list_received_chunks, CHUNKS_ROOT, file_id)
+        if len(received) >= total_chunks:
             final_name = await run_in_threadpool(
                 merge_chunks,
                 CHUNKS_ROOT,
@@ -271,8 +306,7 @@ async def upload_chunk(
             upload_locks.pop(file_id, None)
             return {"merged": True, "filename": final_name}
 
-    received_count = len(await run_in_threadpool(list_received_chunks, CHUNKS_ROOT, file_id))
-    return {"merged": False, "received_chunks": received_count}
+        return {"merged": False, "received_chunks": len(received)}
 
 
 @app.get("/upload-status")
@@ -312,7 +346,7 @@ async def download_file(filename: str, request: Request):
     file_path = (UPLOAD_DIR / safe_name).resolve()
     if file_path.parent != UPLOAD_DIR.resolve() or not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-    return build_streaming_response(file_path, request, inline=False)
+    return build_streaming_response(file_path, request, inline=False, delete_on_complete=True)
 
 
 @app.get("/preview/{filename:path}")
@@ -333,9 +367,9 @@ async def delete_file(filename: str):
 
     try:
         file_path.unlink()
-        file_owners.pop(safe_name, None)
     except OSError as exc:
         raise HTTPException(status_code=500, detail="Failed to delete file") from exc
+    forget_file(safe_name)
     return JSONResponse({"deleted": True, "filename": safe_name})
 
 

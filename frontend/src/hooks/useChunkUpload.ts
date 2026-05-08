@@ -37,6 +37,7 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
   const [active, setActive] = useState(false);
   const itemsRef = useRef<UploadItem[]>(items);
   const activeRef = useRef<boolean>(active);
+  const abortersRef = useRef<Map<string, AbortController>>(new Map());
 
   useEffect(() => {
     itemsRef.current = items;
@@ -45,6 +46,15 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
+
+  useEffect(() => {
+    return () => {
+      for (const controller of abortersRef.current.values()) {
+        controller.abort();
+      }
+      abortersRef.current.clear();
+    };
+  }, []);
 
   const addFiles = (fileList: FileList | null | undefined): void => {
     const incoming = Array.from(fileList ?? []).map(createUploadItem);
@@ -60,6 +70,11 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
   };
 
   const removeItem = (id: string): void => {
+    const controller = abortersRef.current.get(id);
+    if (controller) {
+      controller.abort();
+      abortersRef.current.delete(id);
+    }
     setItems((prev) => {
       const found = prev.find((item) => item.id === id);
       if (found?.preview) {
@@ -88,6 +103,9 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
       for (const item of queue) {
         if (!["pending", "failed"].includes(item.status)) continue;
 
+        const controller = new AbortController();
+        abortersRef.current.set(item.id, controller);
+
         setItems((prev) =>
           prev.map((entry) =>
             entry.id === item.id
@@ -101,6 +119,7 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
             file: item.file,
             clientId,
             concurrency: 4,
+            signal: controller.signal,
             onProgress: ({ progress, speedMbps, done }: UploadProgressEvent) => {
               setItems((prev) =>
                 prev.map((entry) =>
@@ -117,6 +136,9 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
             },
           });
         } catch (error) {
+          if (controller.signal.aborted) {
+            continue;
+          }
           setItems((prev) =>
             prev.map((entry) =>
               entry.id === item.id
@@ -128,6 +150,8 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
                 : entry
             )
           );
+        } finally {
+          abortersRef.current.delete(item.id);
         }
       }
     } finally {

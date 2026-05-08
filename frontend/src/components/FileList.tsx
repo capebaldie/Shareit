@@ -9,33 +9,10 @@ interface FileListProps {
 }
 
 function typeLabel(type: SharedFileType): string {
-  if (type === "image") return "Image";
+  if (type === "image") return "IMG";
   if (type === "pdf") return "PDF";
-  if (type === "video") return "Video";
-  return "File";
-}
-
-function FileIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path
-        d="M14 2H7a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M14 2v5h5M9 13h6M9 17h6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  if (type === "video") return "VID";
+  return "FILE";
 }
 
 export default function FileList({
@@ -45,40 +22,54 @@ export default function FileList({
   refreshing,
 }: FileListProps) {
   return (
-    <section className="card">
-      <div className="card-header">
+    <section className="box no-pad shadow" aria-label="Available files register">
+      <div className="register-head">
         <h2>Available Files</h2>
-        <p className="muted">{refreshing ? "Refreshing..." : `${files.length} file(s)`}</p>
+        <p className="count">
+          <em>{files.length.toString().padStart(2, "0")}</em>
+          {refreshing ? "polling…" : files.length === 1 ? "entry" : "entries"}
+        </p>
       </div>
-      {!files.length && <p className="muted">No shared files yet.</p>}
-      <div className="file-grid">
-        {files.map((file) => (
-          <article key={file.name} className="file-card">
-            <div className="file-icon-wrap">
-              <FileIcon />
-            </div>
-            <div className="file-body">
-              <p className="file-name" title={file.name}>
-                {file.name}
-              </p>
-              <p className="file-meta">
-                {formatBytes(file.size)} • {typeLabel(file.type)}
-              </p>
-            </div>
-            <div className="file-actions">
-              <a
-                className="link-button"
-                href={`${apiBase}/download/${encodeURIComponent(file.name)}`}
-              >
-                Save
-              </a>
-              <button type="button" onClick={() => onDelete(file.name)}>
-                Delete
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
+
+      {!files.length ? (
+        <p className="register-empty">
+          <span className="glyph" aria-hidden>∅</span>
+          No shared files yet. Standing by for incoming.
+        </p>
+      ) : (
+        <>
+          <div className="register-grid-head" aria-hidden>
+            <span>#</span>
+            <span>Filename</span>
+            <span>Size</span>
+            <span>Type</span>
+            <span style={{ textAlign: "right" }}>Actions</span>
+          </div>
+          {files.map((file, idx) => (
+            <article key={file.name} className="register-row">
+              <span className="idx">{(idx + 1).toString().padStart(2, "0")}</span>
+              <span className="name" title={file.name}>{file.name}</span>
+              <span className="size">{formatBytes(file.size)}</span>
+              <span className="ttype">{typeLabel(file.type)}</span>
+              <span className="actions">
+                <a
+                  className="btn tiny no-arrow"
+                  href={`${apiBase}/download/${encodeURIComponent(file.name)}`}
+                >
+                  ↧ Save
+                </a>
+                <button
+                  type="button"
+                  className="btn tiny no-arrow ghost"
+                  onClick={() => onDelete(file.name)}
+                >
+                  ✕ Delete
+                </button>
+              </span>
+            </article>
+          ))}
+        </>
+      )}
     </section>
   );
 }

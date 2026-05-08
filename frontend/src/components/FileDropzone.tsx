@@ -32,10 +32,18 @@ export default function FileDropzone({ onFiles }: FileDropzoneProps) {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      aria-label="File intake dropzone"
     >
-      <p className="dropzone-title">Drop files here</p>
-      <p className="dropzone-subtitle">Images, PDFs, MP4/MKV/MOV</p>
-      <button type="button" onClick={() => inputRef.current?.click()}>
+      <span className="glyph" aria-hidden>↧</span>
+      <p className="dropzone-title">
+        {dragging ? "Release to load" : "Drop payload here"}
+      </p>
+      <p className="dropzone-subtitle">jpg · png · webp · pdf · mp4 · mkv · mov</p>
+      <button
+        type="button"
+        className="btn"
+        onClick={() => inputRef.current?.click()}
+      >
         Pick Files
       </button>
       <input
