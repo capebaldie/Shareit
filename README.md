@@ -6,8 +6,9 @@ High-performance LAN file sharing app for images, PDFs, and videos between phone
 
 - Chunked upload (`1 MB`) with parallel chunk workers
 - Resume-friendly uploads via chunk status check
+- Cancel an in-flight upload from the queue
 - Streaming download with HTTP Range support (video seek/resume)
-- Inline preview for image, PDF, and video
+- Auto-cleanup: a file is removed from `uploads/` after the receiver's first successful Save
 - Mobile-first Send/Receive UI
 - Drag/drop + picker upload
 - Per-file + overall progress
@@ -15,15 +16,19 @@ High-performance LAN file sharing app for images, PDFs, and videos between phone
 - Auto-refresh file list
 - Delete files
 - Light/Dark mode
-  `
+
+## Limits
+
+- Per-file cap: **5 GiB** (rejected with HTTP 413 above the cap).
+- Allowed types: `.jpg`, `.jpeg`, `.png`, `.webp`, `.pdf`, `.mp4`, `.mkv`, `.mov`.
 
 ## Project Structure
 
 - `backend/server.py`
 - `backend/utils/chunk_handler.py`
 - `frontend/src/components/*`
-- `frontend/src/hooks/useChunkUpload.js`
-- `frontend/src/utils/chunkUpload.js`
+- `frontend/src/hooks/useChunkUpload.ts`
+- `frontend/src/utils/chunkUpload.ts`
 
 ## Backend Run
 
@@ -40,23 +45,37 @@ Backend API will be reachable on local network at:
 
 - `http://<your-local-ip>:8000`
 
-The `uploads/` directory is auto-created at backend startup.
+The `uploads/` directory is auto-created at backend startup. Anything left in
+`uploads/` from a previous run is wiped on startup (each app session starts
+clean). During a session, files are also deleted automatically once a receiver
+has finished saving them.
+
 Use no `--reload` during transfer testing because file writes in `uploads/` can trigger restarts.
 
-## Start Both With One Command (Windows)
+## Start Both With One Command
 
 From project root:
 
+**Windows:**
+
 ```powershell
-.\start app
+.\start.ps1
 # or
 .\start-app.cmd
 ```
 
-This opens two terminals:
+**Linux / macOS:**
+
+```bash
+./start-app.sh
+```
+
+This launches:
 
 - Backend (`uvicorn` on port `8000`)
 - Frontend (`vite` on port `5173`)
+
+Both launchers fail fast if either port is already in use.
 
 ## Frontend Run (Vite)
 
@@ -82,7 +101,9 @@ VITE_API_BASE=http://192.168.x.x:8000
 1. Ensure phone and PC are on the same Wi-Fi or hotspot.
 2. Open frontend URL on phone (`http://<pc-ip>:5173`) or scan QR from app.
 3. Upload on **Send Files** tab from phone.
-4. Download/preview from **Receive Files** tab on either device.
+4. Save the file from the **Receive Files** tab on the other device. The
+   first successful Save consumes the file — it disappears from the list
+   afterwards.
 
 ## If Mobile Access Fails Intermittently
 
@@ -92,10 +113,10 @@ VITE_API_BASE=http://192.168.x.x:8000
 
 ## API Endpoints
 
-- `POST /upload-chunk` (multipart form: `chunk`, `file_id`, `chunk_index`, `total_chunks`, `filename`, optional `client_id`)
+- `POST /upload-chunk` (multipart form: `chunk`, `file_id`, `chunk_index`, `total_chunks`, `filename`, optional `client_id`). Rejects with 413 if `total_chunks * 1 MiB` exceeds the 5 GiB cap.
 - `GET /upload-status?file_id=...`
 - `GET /files` (optional query: `viewer_id` to hide self-uploaded files for that device)
-- `GET /download/{filename}`
-- `GET /preview/{filename}`
+- `GET /download/{filename}` — full GET (no `Range` header) auto-deletes the file from `uploads/` after a successful response.
+- `GET /preview/{filename}` — same streaming, never deletes; supports `Range` for video seek.
 - `DELETE /files/{filename}`
 - `GET /local-info`
