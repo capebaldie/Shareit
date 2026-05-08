@@ -4,7 +4,7 @@
    IBM Plex Mono + Major Mono Display, paper/ink, signal-red.
    ============================================================ */
 
-:root {
+:root[data-design="dispatch"] {
   --paper:     #efe8d8;
   --paper-2:   #e7dfca;
   --paper-3:   #ddd3ba;
@@ -29,7 +29,7 @@
   color-scheme: light;
 }
 
-:root[data-theme="dark"] {
+:root[data-design="dispatch"][data-theme="dark"] {
   --paper:     #0d0d0a;
   --paper-2:   #16140f;
   --paper-3:   #1d1b15;
@@ -51,11 +51,11 @@
 
 * { box-sizing: border-box; }
 
-*::selection {
+:root[data-design="dispatch"] *::selection {
   background: var(--ink);
   color: var(--paper);
 }
-:root[data-theme="dark"] *::selection {
+:root[data-design="dispatch"][data-theme="dark"] *::selection {
   background: var(--accent);
   color: var(--ink);
 }
@@ -63,18 +63,21 @@
 html, body {
   margin: 0;
   padding: 0;
+}
+
+:root[data-design="dispatch"] {
   scrollbar-width: thin;
   scrollbar-color: var(--ink) var(--paper);
 }
 
-html::-webkit-scrollbar { width: 10px; height: 10px; }
-html::-webkit-scrollbar-track { background: var(--paper); }
-html::-webkit-scrollbar-thumb {
+:root[data-design="dispatch"] html::-webkit-scrollbar { width: 10px; height: 10px; }
+:root[data-design="dispatch"] html::-webkit-scrollbar-track { background: var(--paper); }
+:root[data-design="dispatch"] html::-webkit-scrollbar-thumb {
   background: var(--ink);
   border: 2px solid var(--paper);
 }
 
-body {
+:root[data-design="dispatch"] body {
   font-family: var(--mono);
   font-weight: 400;
   font-size: 14px;
@@ -89,7 +92,7 @@ body {
 }
 
 /* Paper grain overlay – fixed, non-interactive */
-body::before {
+:root[data-design="dispatch"] body::before {
   content: "";
   position: fixed;
   inset: 0;
@@ -100,12 +103,12 @@ body::before {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.7 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
 }
 
-:root[data-theme="dark"] body::before {
+:root[data-design="dispatch"][data-theme="dark"] body::before {
   mix-blend-mode: screen;
 }
 
 /* Subtle dotted grid in the field */
-body::after {
+:root[data-design="dispatch"] body::after {
   content: "";
   position: fixed;
   inset: 0;
