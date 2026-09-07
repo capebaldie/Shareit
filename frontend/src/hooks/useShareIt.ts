@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { LocalInfo, SharedFile, TransferMode } from "../types";
 import { apiFetch, getApiBase } from "../utils/api";
 import { getDeviceId } from "../utils/deviceId";
@@ -12,6 +12,10 @@ export function useShareIt() {
   const [refreshing, setRefreshing] = useState(false);
   const [localInfo, setLocalInfo] = useState<LocalInfo | null>(null);
   const [now, setNow] = useState<Date>(() => new Date());
+  const [incoming, setIncoming] = useState<SharedFile[]>([]);
+  // null until the first successful fetch, so files already on the server
+  // when the page loads are not announced as new arrivals.
+  const knownNames = useRef<Set<string> | null>(null);
 
   const queue = useChunkUpload(deviceId);
 
@@ -24,7 +28,20 @@ export function useShareIt() {
         );
         if (response.ok) {
           const payload = (await response.json()) as { files?: SharedFile[] };
-          setFiles(payload.files || []);
+          const list = payload.files || [];
+          setFiles(list);
+
+          const seen = knownNames.current;
+          knownNames.current = new Set(list.map((f) => f.name));
+          if (seen) {
+            const fresh = list.filter((f) => !seen.has(f.name));
+            if (fresh.length) {
+              setIncoming((prev) => [
+                ...prev,
+                ...fresh.filter((f) => !prev.some((p) => p.name === f.name)),
+              ]);
+            }
+          }
         }
       } finally {
         if (!silent) setRefreshing(false);
@@ -48,8 +65,9 @@ export function useShareIt() {
     fetchLocalInfo();
   }, [fetchLocalInfo]);
 
+  // Poll in both modes: a sender needs to know files arrived without
+  // switching to the receive tab to find out.
   useEffect(() => {
-    if (mode !== "receive") return undefined;
     fetchFiles();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") {
@@ -57,7 +75,12 @@ export function useShareIt() {
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [mode, fetchFiles]);
+  }, [fetchFiles]);
+
+  // While the list is on screen the banner is redundant.
+  useEffect(() => {
+    if (mode === "receive") setIncoming([]);
+  }, [mode, files]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -68,6 +91,8 @@ export function useShareIt() {
     await queue.startUpload();
     await fetchFiles(true);
   }, [queue, fetchFiles]);
+
+  const dismissIncoming = useCallback((): void => setIncoming([]), []);
 
   const handleDelete = useCallback(
     async (filename: string): Promise<void> => {
@@ -92,6 +117,8 @@ export function useShareIt() {
     refreshing,
     localInfo,
     now,
+    incoming,
+    dismissIncoming,
     items: queue.items,
     active: queue.active,
     overallProgress: queue.overallProgress,

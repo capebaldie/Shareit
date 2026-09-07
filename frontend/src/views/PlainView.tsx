@@ -318,6 +318,8 @@ export default function PlainView({
   files,
   refreshing,
   localInfo,
+  incoming,
+  dismissIncoming,
   items,
   active,
   overallProgress,
@@ -357,6 +359,32 @@ export default function PlainView({
           </button>
         </div>
       </header>
+
+      {incoming.length > 0 && (
+        <div className="plain-banner incoming" role="status" aria-live="polite">
+          <span aria-hidden>↓</span>
+          <span className="msg">
+            {incoming.length === 1
+              ? `Received "${incoming[0].name}"`
+              : `Received ${incoming.length} files`}
+          </span>
+          <button
+            type="button"
+            className="plain-btn sm"
+            onClick={() => setMode("receive")}
+          >
+            View
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={dismissIncoming}
+            aria-label="Dismiss notification"
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <PlainConnection localInfo={localInfo} />
       <PlainModeToggle mode={mode} onChange={setMode} />

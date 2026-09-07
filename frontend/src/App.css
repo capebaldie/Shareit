@@ -1130,3 +1130,9 @@ button {
   .register-row .size,
   .register-row .ttype { display: none; }
 }
+
+.status-banner .rx-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

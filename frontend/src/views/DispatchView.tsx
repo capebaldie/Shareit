@@ -41,6 +41,8 @@ export default function DispatchView({
   files,
   refreshing,
   localInfo,
+  incoming,
+  dismissIncoming,
   now,
   items,
   active,
@@ -116,6 +118,34 @@ export default function DispatchView({
           <span><b>CHANNEL</b> · {linkOk ? "OPEN" : "STANDBY"}</span>
         </div>
       </section>
+
+      {incoming.length > 0 && (
+        <div className="status-banner rx" role="status" aria-live="polite">
+          <span className="stamp-icon" aria-hidden>▼</span>
+          <span>
+            {incoming.length === 1
+              ? `INBOUND — ${incoming[0].name}`
+              : `INBOUND — ${incoming.length} PAYLOADS RECEIVED`}
+          </span>
+          <span className="rx-actions">
+            <button
+              type="button"
+              className="tb-theme"
+              onClick={() => setMode("receive")}
+            >
+              OPEN RX
+            </button>
+            <button
+              type="button"
+              className="tb-theme"
+              onClick={dismissIncoming}
+              aria-label="Dismiss notification"
+            >
+              ×
+            </button>
+          </span>
+        </div>
+      )}
 
       <SectionHead num="01" title="CONNECT" stamp="MANIFEST" />
       <ConnectionCard localInfo={localInfo} />
