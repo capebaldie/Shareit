@@ -59,8 +59,6 @@ From project root:
 **Windows:**
 
 ```powershell
-.\start.ps1
-# or
 .\start-app.cmd
 ```
 

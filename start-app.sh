@@ -30,6 +30,11 @@ for PORT in 8000 5173; do
   fi
 done
 
+if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
+  echo "Installing frontend dependencies, this may take a minute..."
+  (cd "$FRONTEND_DIR" && npm install)
+fi
+
 BACKEND_PID=""
 FRONTEND_PID=""
 
@@ -63,4 +68,7 @@ echo "  Backend  (PID $BACKEND_PID) on http://localhost:8000"
 echo "  Frontend (PID $FRONTEND_PID) on http://localhost:5173"
 echo "Press Ctrl+C to stop both."
 
-wait -n "$BACKEND_PID" "$FRONTEND_PID"
+# bash 3.2 (macOS default) has no `wait -n`; poll instead
+while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do
+  sleep 1
+done

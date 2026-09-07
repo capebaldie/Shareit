@@ -20,6 +20,13 @@ for %%P in (8000 5173) do (
   )
 )
 
+if not exist "%FRONTEND_DIR%\node_modules" (
+  echo Installing frontend dependencies, this may take a minute...
+  pushd "%FRONTEND_DIR%"
+  call npm install || exit /b 1
+  popd
+)
+
 start "ShareIt Backend" cmd /k "cd /d ""%BACKEND_DIR%"" && ""%PYTHON_EXE%"" -m uvicorn server:app --host 0.0.0.0 --port 8000"
 start "ShareIt Frontend" cmd /k "cd /d ""%FRONTEND_DIR%"" && npm run dev"
 
