@@ -191,6 +191,10 @@ def get_local_ips() -> list[str]:
     except socket.gaierror:
         pass
 
+    # The routing table's own answer. On Windows getaddrinfo() above also
+    # returns VirtualBox / VMware / Docker / Hyper-V adapter IPs that a phone
+    # cannot reach, so this one wins over any numeric ranking.
+    route_ip: str | None = None
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
             # No packets are sent; this asks the OS which interface is active.
@@ -198,12 +202,13 @@ def get_local_ips() -> list[str]:
             addr = sock.getsockname()[0]
             if addr and not addr.startswith("127."):
                 addresses.add(addr)
+                route_ip = addr
     except OSError:
         pass
 
     ranked_ips = sorted(
         (ip for ip in addresses if is_usable_lan_ip(ip)),
-        key=ip_rank,
+        key=lambda ip: (-1, 0) if ip == route_ip else ip_rank(ip),
     )
     if ranked_ips:
         return ranked_ips
