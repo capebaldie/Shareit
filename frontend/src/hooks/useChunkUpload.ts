@@ -70,6 +70,17 @@ export function useChunkUpload(clientId: string): ChunkUploadHookResult {
   };
 
   const removeItem = (id: string): void => {
+    // Guards against a stray tap on the small × target, which would
+    // otherwise abort an in-flight upload with no way back.
+    const target = items.find((item) => item.id === id);
+    if (target) {
+      const question =
+        target.status === "uploading"
+          ? `Cancel the upload of "${target.file.name}"?`
+          : `Remove "${target.file.name}" from the queue?`;
+      if (!window.confirm(question)) return;
+    }
+
     const controller = abortersRef.current.get(id);
     if (controller) {
       controller.abort();
