@@ -1,6 +1,6 @@
 # ShareIt Local File Transfer (FastAPI + React)
 
-High-performance LAN file sharing app for images, PDFs, and videos between phone and PC.
+Fast, private file sharing between your phone and PC over Wi-Fi. Scan a QR code to pair, then send images, PDFs and videos. No cloud, no cables, no account, and nobody else on the network can see your files.
 
 ## Features
 
@@ -13,9 +13,44 @@ High-performance LAN file sharing app for images, PDFs, and videos between phone
 - Drag/drop + picker upload
 - Per-file + overall progress
 - Local network URL display + QR code
+- Pairing token: only devices that scanned the host's QR code can list, send, download or delete files
 - Auto-refresh file list
 - Delete files
 - Light/Dark mode
+
+## Pairing
+
+The server binds `0.0.0.0`, so every device on the Wi-Fi can reach it. A pairing token gates all of
+it — listing, upload, download and delete. Without one, a stranger on the same network does not
+merely read your files: a completed download deletes the file, so the intended receiver never sees
+it arrive.
+
+- The token is printed at startup, and is baked into the QR code as a URL hash, so scanning pairs
+  the phone with no typing. Browsers never send a hash to a server, so it stays out of access logs.
+- Requests from `127.0.0.1` skip the check. The host owns the files already, and a loopback packet
+  cannot come from another device — so the PC's own browser needs no token.
+- `<a href>` and `<img src>` cannot carry a custom header, so `/download` and `/preview` also accept
+  `?t=<token>`.
+- A new token every start, so one that leaks dies with the session. Export `SHAREIT_TOKEN` to pin it
+  and stop re-scanning after each restart.
+
+On the PC open `http://localhost:5173`. Anywhere else, use the `#t=` URL the banner prints — a
+stale or missing token answers `401` with a message telling you to rescan.
+
+```bash
+cd backend && python test_auth.py   # loopback, header, ?t=, and everything rejected
+```
+
+### What the token does not cover
+
+- **The QR code is the password.** Anyone who scans or photographs the host screen, or reads the
+  startup banner, is paired. Do not show it to people you would not hand your files to.
+- **Traffic is plain HTTP.** The token and files are unencrypted on the network. On a trusted home
+  Wi-Fi or your own hotspot that is fine; on open or public Wi-Fi someone capturing packets can read
+  the token.
+- **A paired device stays paired until the server restarts.** Restart to revoke everyone. With
+  `SHAREIT_TOKEN` pinned, a leaked token never expires, so change it if it leaks.
+- **Anyone using the host PC is trusted** without a token.
 
 ## Limits
 

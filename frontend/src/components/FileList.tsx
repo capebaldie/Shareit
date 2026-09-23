@@ -1,4 +1,5 @@
 import { formatBytes } from "../utils/chunkUpload";
+import { withToken } from "../utils/api";
 import type { SharedFile, SharedFileType } from "../types";
 
 interface FileListProps {
@@ -54,7 +55,7 @@ export default function FileList({
               <span className="actions">
                 <a
                   className="btn tiny no-arrow"
-                  href={`${apiBase}/download/${encodeURIComponent(file.name)}`}
+                  href={withToken(`${apiBase}/download/${encodeURIComponent(file.name)}`)}
                 >
                   ↧ Save
                 </a>
