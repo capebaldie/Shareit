@@ -1,13 +1,15 @@
 import asyncio
 import ipaddress
 import mimetypes
+import os
+import secrets
 import socket
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -32,10 +34,18 @@ MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024
 MAX_TOTAL_CHUNKS = (MAX_FILE_BYTES + CHUNK_SIZE - 1) // CHUNK_SIZE
 STREAM_BUFFER_SIZE = 1024 * 1024
 
+# Regenerated every start, so a token that leaks dies with the session. Set SHAREIT_TOKEN to pin
+# one if you would rather not rescan the QR code after every restart.
+AUTH_TOKEN = os.environ.get("SHAREIT_TOKEN") or secrets.token_urlsafe(8)
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await run_in_threadpool(reset_session_storage)
+    lan_ip = get_local_ips()[0]
+    print(f"\n  ShareIt pairing token: {AUTH_TOKEN}")
+    print(f"  On this PC:      http://localhost:5173")
+    print(f"  Scan from phone: http://{lan_ip}:5173/#t={AUTH_TOKEN}\n", flush=True)
     yield
 
 
@@ -54,6 +64,32 @@ file_owners: dict[str, str] = {}
 RFC1918_192 = ipaddress.ip_network("192.168.0.0/16")
 RFC1918_10 = ipaddress.ip_network("10.0.0.0/8")
 RFC1918_172 = ipaddress.ip_network("172.16.0.0/12")
+
+
+def _is_loopback(request: Request) -> bool:
+    host = request.client.host if request.client else None
+    if not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def require_token(request: Request) -> None:
+    """The host machine is trusted; every other device on the Wi-Fi must present the token.
+
+    Without this, anyone on the same network can list, download and delete files. A download also
+    deletes the file once it completes, so a stranger does not merely read it -- they take it, and
+    the intended receiver never sees it arrive.
+    """
+    if _is_loopback(request):
+        return
+    # <a href> and <img src> cannot carry a custom header, so /download and /preview take ?t= too
+    supplied = request.headers.get("x-shareit-token") or request.query_params.get("t", "")
+    # bytes, not str: compare_digest raises TypeError on non-ASCII, which a caller controls
+    if not secrets.compare_digest(supplied.encode("utf-8"), AUTH_TOKEN.encode("utf-8")):
+        raise HTTPException(status_code=401, detail="Pairing token missing or invalid. Rescan the QR code.")
 
 
 def get_lock(file_id: str) -> asyncio.Lock:
@@ -247,8 +283,8 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/local-info")
-async def local_info() -> dict[str, object]:
+@app.get("/local-info", dependencies=[Depends(require_token)])
+async def local_info(request: Request) -> dict[str, object]:
     local_ips = get_local_ips()
     preferred_ip = local_ips[0]
     return {
@@ -257,10 +293,12 @@ async def local_info() -> dict[str, object]:
         "preferred_url": f"http://{preferred_ip}:8000",
         "local_ips": local_ips,
         "urls": [f"http://{ip}:8000" for ip in local_ips],
+        # only the host builds the QR code, and only the host is trusted without a token
+        "token": AUTH_TOKEN if _is_loopback(request) else None,
     }
 
 
-@app.post("/upload-chunk")
+@app.post("/upload-chunk", dependencies=[Depends(require_token)])
 async def upload_chunk(
     chunk: UploadFile = File(...),
     file_id: str = Form(...),
@@ -314,7 +352,7 @@ async def upload_chunk(
         return {"merged": False, "received_chunks": len(received)}
 
 
-@app.get("/upload-status")
+@app.get("/upload-status", dependencies=[Depends(require_token)])
 async def upload_status(file_id: str = Query(...)) -> dict[str, object]:
     if file_id in merged_uploads:
         return {"merged": True, "filename": merged_uploads[file_id], "received_chunks": []}
@@ -323,7 +361,7 @@ async def upload_status(file_id: str = Query(...)) -> dict[str, object]:
     return {"merged": False, "received_chunks": received}
 
 
-@app.get("/files")
+@app.get("/files", dependencies=[Depends(require_token)])
 async def list_files(viewer_id: str | None = Query(default=None)) -> dict[str, list[dict[str, object]]]:
     files = []
     for path in UPLOAD_DIR.iterdir():
@@ -345,7 +383,7 @@ async def list_files(viewer_id: str | None = Query(default=None)) -> dict[str, l
     return {"files": files}
 
 
-@app.get("/download/{filename:path}")
+@app.get("/download/{filename:path}", dependencies=[Depends(require_token)])
 async def download_file(filename: str, request: Request):
     safe_name = sanitize_filename(filename)
     file_path = (UPLOAD_DIR / safe_name).resolve()
@@ -354,7 +392,7 @@ async def download_file(filename: str, request: Request):
     return build_streaming_response(file_path, request, inline=False, delete_on_complete=True)
 
 
-@app.get("/preview/{filename:path}")
+@app.get("/preview/{filename:path}", dependencies=[Depends(require_token)])
 async def preview_file(filename: str, request: Request):
     safe_name = sanitize_filename(filename)
     file_path = (UPLOAD_DIR / safe_name).resolve()
@@ -363,7 +401,7 @@ async def preview_file(filename: str, request: Request):
     return build_streaming_response(file_path, request, inline=True)
 
 
-@app.delete("/files/{filename:path}")
+@app.delete("/files/{filename:path}", dependencies=[Depends(require_token)])
 async def delete_file(filename: str):
     safe_name = sanitize_filename(filename)
     file_path = (UPLOAD_DIR / safe_name).resolve()
@@ -378,7 +416,7 @@ async def delete_file(filename: str):
     return JSONResponse({"deleted": True, "filename": safe_name})
 
 
-@app.delete("/upload-status/{file_id}")
+@app.delete("/upload-status/{file_id}", dependencies=[Depends(require_token)])
 async def clear_upload_cache(file_id: str):
     await run_in_threadpool(cleanup_chunks, CHUNKS_ROOT, file_id)
     merged_uploads.pop(file_id, None)

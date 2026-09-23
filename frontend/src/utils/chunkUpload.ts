@@ -4,6 +4,7 @@ import type { SharedFileType } from "../types";
 export const CHUNK_SIZE = 1024 * 1024;
 const DEFAULT_CONCURRENCY = 4;
 const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 400;
 
 interface UploadStatusResponse {
   merged: boolean;
@@ -56,6 +57,26 @@ function getChunkByteSize(file: File, chunkIndex: number): number {
   return Math.max(0, chunkEnd - chunkStart);
 }
 
+// A 4xx means the server rejected these exact bytes -- unsupported type, chunk too large, index
+// out of range, bad token. Sending them again gets the same answer, so only blips are worth a retry.
+function isRetriableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+      },
+      { once: true },
+    );
+  });
+}
+
 async function requestUploadStatus(fileId: string, signal?: AbortSignal): Promise<UploadStatusResponse> {
   const response = await apiFetch(`/upload-status?file_id=${encodeURIComponent(fileId)}`, { signal });
   if (!response.ok) {
@@ -88,21 +109,32 @@ async function sendChunk({
     formData.append("client_id", clientId);
   }
 
-  let attempt = 0;
-  while (attempt < retries) {
-    attempt += 1;
-    const response = await apiFetch("/upload-chunk", {
-      method: "POST",
-      body: formData,
-      signal,
-    });
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    let response: Response;
+    try {
+      response = await apiFetch("/upload-chunk", {
+        method: "POST",
+        body: formData,
+        signal,
+      });
+    } catch (error) {
+      // fetch rejects on a dropped connection, which is the flaky-mobile-Wi-Fi case resume exists
+      // for. That rejection used to escape this loop, so the one failure actually worth retrying
+      // was the one never retried.
+      if (signal?.aborted || attempt >= retries) throw error;
+      await delay(RETRY_BASE_MS * 2 ** (attempt - 1), signal);
+      continue;
+    }
+
     if (response.ok) {
       return response.json();
     }
-    if (attempt >= retries) {
-      const body = await response.text();
-      throw new Error(body || "Chunk upload failed");
-    }
+
+    const detail = await response.text();
+    const failure = new Error(detail || `Chunk upload failed (${response.status})`);
+    if (!isRetriableStatus(response.status) || attempt >= retries) throw failure;
+    // plain backoff, not jittered: the contending workers are this one upload's own four
+    await delay(RETRY_BASE_MS * 2 ** (attempt - 1), signal);
   }
   throw new Error("Chunk upload failed");
 }
@@ -158,22 +190,30 @@ export async function uploadFileInChunks({
   }
 
   let cursor = 0;
+  let failed = false;
   const workerCount = Math.max(1, Math.min(concurrency, pendingChunks.length));
 
   const worker = async (): Promise<void> => {
-    while (cursor < pendingChunks.length) {
+    while (!failed && cursor < pendingChunks.length) {
       const current = cursor;
       cursor += 1;
       const chunkIndex = pendingChunks[current];
-      await sendChunk({
-        file,
-        fileId,
-        clientId,
-        chunkIndex,
-        totalChunks,
-        filename: file.name,
-        signal,
-      });
+      try {
+        await sendChunk({
+          file,
+          fileId,
+          clientId,
+          chunkIndex,
+          totalChunks,
+          filename: file.name,
+          signal,
+        });
+      } catch (error) {
+        // Promise.all rejects on the first throw but does not stop the siblings. Without this they
+        // keep uploading, and keep reporting progress, for a transfer that has already failed.
+        failed = true;
+        throw error;
+      }
 
       uploadedBytes += getChunkByteSize(file, chunkIndex);
       const elapsedSeconds = Math.max((performance.now() - startedAt) / 1000, 0.001);

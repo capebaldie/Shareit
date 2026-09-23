@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import * as QRCode from "qrcode";
 import { formatBytes } from "../utils/chunkUpload";
+import { withToken } from "../utils/api";
 import type {
   LocalInfo,
   SharedFile,
@@ -38,7 +39,9 @@ function PlainConnection({ localInfo }: { localInfo: LocalInfo | null }) {
       return window.location.origin;
     }
     const ip = localInfo?.preferred_ip || localInfo?.local_ips?.[0];
-    return ip ? buildFrontendUrl(ip) : window.location.origin;
+    const base = ip ? buildFrontendUrl(ip) : window.location.origin;
+    // same pairing link as ConnectionCard: the token rides in the hash, set only for the host
+    return localInfo?.token ? `${base}/#t=${encodeURIComponent(localInfo.token)}` : base;
   }, [localInfo]);
 
   useEffect(() => {
@@ -291,7 +294,7 @@ function PlainFiles({
               <div className="actions">
                 <a
                   className="plain-btn sm"
-                  href={`${apiBase}/download/${encodeURIComponent(file.name)}`}
+                  href={withToken(`${apiBase}/download/${encodeURIComponent(file.name)}`)}
                 >
                   Download
                 </a>

@@ -13,6 +13,8 @@ export interface LocalInfo {
   preferred_ip?: string;
   local_ips?: string[];
   urls?: string[];
+  // only ever populated for the host itself, which is the only device that renders the QR code
+  token?: string | null;
 }
 
 export interface UploadItem {

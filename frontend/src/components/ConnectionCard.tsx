@@ -27,9 +27,15 @@ export default function ConnectionCard({ localInfo }: ConnectionCardProps) {
     return window.location.origin;
   }, [localInfo]);
 
+  // The token rides in the hash so the phone is paired by the scan alone. Browsers never send a
+  // hash to the server, so it cannot leak into a proxy or access log on the way.
+  const pairingUrl = localInfo?.token
+    ? `${preferredFrontendUrl}/#t=${encodeURIComponent(localInfo.token)}`
+    : preferredFrontendUrl;
+
   useEffect(() => {
     let mounted = true;
-    QRCode.toDataURL(preferredFrontendUrl, {
+    QRCode.toDataURL(pairingUrl, {
       errorCorrectionLevel: "M",
       width: 320,
       margin: 0,
@@ -44,7 +50,7 @@ export default function ConnectionCard({ localInfo }: ConnectionCardProps) {
     return () => {
       mounted = false;
     };
-  }, [preferredFrontendUrl]);
+  }, [pairingUrl]);
 
   const apiUrls = localInfo?.urls ?? [];
 
@@ -82,7 +88,14 @@ export default function ConnectionCard({ localInfo }: ConnectionCardProps) {
         <div className="field">
           <span className="field-key">Pairing</span>
           <span className="field-val" style={{ fontSize: 12, color: "var(--ink-soft)" }}>
-            Same Wi-Fi or hotspot. Scan the code, or punch in the URL.
+            {localInfo?.token ? (
+              <>
+                Same Wi-Fi or hotspot. Scan the code, or open the URL and append{" "}
+                <code>#t={localInfo.token}</code>.
+              </>
+            ) : (
+              "Same Wi-Fi or hotspot. Scan the code from the host screen."
+            )}
           </span>
         </div>
       </div>
